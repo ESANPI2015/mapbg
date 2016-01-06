@@ -4,6 +4,11 @@
 #include <unistd.h>
 #include <string.h>
 
+int defaultCost(sw2hw_map_t *map, unsigned int hwId, unsigned int swId)
+{
+    return (costByNeighbours(map, hwId, swId) + costByAssignments(map, hwId, swId));
+}
+
 int main (int argc, char *argv[])
 {
     int opt;
@@ -38,9 +43,12 @@ int main (int argc, char *argv[])
     bg_initialize();
 
     sw2hw_map_init(&mapping, hwYamlFile, swYamlFile);
-    sw2hw_premap(&mapping);
-    sw2hw_map(&mapping);
-    sw2hw_map_refine(&mapping);
+    sw2hw_map_match(&mapping);
+    sw2hw_map_initial(&mapping, defaultCost);
+    do {
+        while (sw2hw_map_refine(&mapping, defaultCost) == SW2HW_ERR_NONE);
+    } while (sw2hw_map_regroup(&mapping, defaultCost) == SW2HW_ERR_NONE);
+
     for (entry = priority_list_first(mapping.assignments, &it);
             entry;
             entry = priority_list_next(&it))
