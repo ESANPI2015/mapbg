@@ -25,8 +25,11 @@ typedef enum {
     SW2HW_ERR_NONE = 0,
     SW2HW_ERR_UNKNOWN,
     SW2HW_ERR_DUPLICATE_ASSIGNMENT,
-    SW2HW_ERR_NOMEM
+    SW2HW_ERR_NOMEM,
+    SW2HW_ERR_NOT_FOUND
 } sw2hw_error;
+
+typedef int (*costFuncPtr)(sw2hw_map_t *, const unsigned int, const unsigned int);
 
 sw2hw_error sw2hw_map_init(sw2hw_map_t *map, const char *hwGraphName, const char *swGraphName);
 void sw2hw_map_destroy(sw2hw_map_t *map);
@@ -35,10 +38,21 @@ sw2hw_map_entry_t *sw2hw_map_get_assignment(sw2hw_map_t *map, const unsigned int
 sw2hw_error sw2hw_map_assign(sw2hw_map_t *map, const unsigned int hwId, const unsigned int swId, const int prio, const bool fixed);
 
 /*Match SOURCES & SINKS in HW to INPUTS & OUTPUTS in SW by name*/
-sw2hw_error sw2hw_premap(sw2hw_map_t *map);
-/*All SW entities will be assigned to one and only one HW entity*/
-sw2hw_error sw2hw_map(sw2hw_map_t *map);
-/*Try to find better assignments*/
-sw2hw_error sw2hw_map_refine(sw2hw_map_t *map);
+sw2hw_error sw2hw_map_match(sw2hw_map_t *map);
+
+/*Standard cost functions*/
+int costByNeighbours(sw2hw_map_t *map, const unsigned int hwId, const unsigned int swId);
+int costByExternalEdges(sw2hw_map_t *map, const unsigned int hwId, const unsigned int swId);
+int costByAssignments(sw2hw_map_t *map, const unsigned int hwId, const unsigned int swId);
+
+/*NOTE: The following functions need a cost function to be passed*/
+/*For all current assignments priority list is updated and sum of costs returned*/
+int sw2hw_map_calculate_costs(sw2hw_map_t *map, costFuncPtr cost);
+/*All unassigned SW entities will be assigned to one and only one HW entity*/
+sw2hw_error sw2hw_map_initial(sw2hw_map_t *map, costFuncPtr cost);
+/*Try to find better targets for assigned sw entities*/
+sw2hw_error sw2hw_map_refine(sw2hw_map_t *map, costFuncPtr cost);
+/*Try to find better targets for groups of assinments*/
+sw2hw_error sw2hw_map_regroup(sw2hw_map_t *map, costFuncPtr cost);
 
 #endif
