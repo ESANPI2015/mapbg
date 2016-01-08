@@ -43,26 +43,13 @@ set(HEADERS
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules/")
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
-add_library(sw2hwmap STATIC ${SOURCES})
-target_link_libraries(sw2hwmap
+add_library(mapBG STATIC ${SOURCES})
+target_link_libraries(mapBG
     ${mapBG_PKGCONFIG_LIBRARIES}
-    )
-# at first we have a minimal cmdline app, which exports simply everything into plaintext files
-add_executable(mapper ${SOURCES}
-    src/mapper.c
-    )
-target_link_libraries(mapper
-    ${mapBG_PKGCONFIG_LIBRARIES}
-    )
-add_dependencies(mapper
-    c_bagel
-    hwGraph
     )
 
-# creating a convenience target, so a user can easily execute ileggui, without cd'ing into the builddir
-add_custom_target(mapper-lazy-symlink ALL
-    ln --force -s ${CMAKE_CURRENT_BINARY_DIR}/mapper ${CMAKE_SOURCE_DIR}/mapper
-    DEPENDS mapper)
-# and clean this up if someone asks us to do so
-#set_directory_properties(PROPERTIES
-    #ADDITIONAL_MAKE_CLEAN_FILES "${CMAKE_SOURCE_DIR}/bg2dict_c")
+# pkg-config, to be installed:
+configure_file(${PROJECT_NAME}.pc.in ${CMAKE_BINARY_DIR}/${PROJECT_NAME}.pc @ONLY)
+install(FILES ${CMAKE_BINARY_DIR}/${PROJECT_NAME}.pc DESTINATION lib/pkgconfig)
+# pkg-config for use inside our buildtree
+configure_file(${PROJECT_NAME}-uninstalled.pc.in ${CMAKE_BINARY_DIR}/${PROJECT_NAME}-uninstalled.pc @ONLY)
