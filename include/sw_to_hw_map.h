@@ -55,4 +55,7 @@ sw2hw_error sw2hw_map_refine(sw2hw_map_t *map, costFuncPtr cost);
 /*Try to find better targets for groups of assinments*/
 sw2hw_error sw2hw_map_regroup(sw2hw_map_t *map, costFuncPtr cost);
 
+/*For a specific target id, create a subgraph from assignments*/
+sw2hw_error sw2hw_map_create_subgraph(sw2hw_map_t *map, const unsigned int hwId, bg_graph_t *sub);
+
 #endif

@@ -586,3 +586,150 @@ sw2hw_error sw2hw_map_regroup(sw2hw_map_t *map, costFuncPtr cost)
 
     return err;
 }
+
+sw2hw_error sw2hw_map_create_subgraph(sw2hw_map_t *map, const unsigned int hwId, bg_graph_t *sub)
+{
+    sw2hw_error err = SW2HW_ERR_NONE;
+    priority_list_t *group;
+    priority_list_iterator_t it, it2;
+    sw2hw_map_entry_t *entry, *entry2;
+    bg_node_t *node;
+    bg_edge_t *edge;
+    hw_node_t *target;
+    unsigned int maxId = 0;
+    unsigned int i,j;
+
+    priority_list_init(&group);
+
+    /*Generate group with hwId*/
+    for (entry = priority_list_first(map->assignments, &it);
+            entry;
+            entry = priority_list_next(&it))
+        if (entry->hwId == hwId)
+            priority_list_insert(group, entry, priority_list_get_priority(&it), &it2);
+
+    /*For each entry: Clone the nodes and update maxId*/
+    for (entry = priority_list_first(group, &it);
+            entry;
+            entry = priority_list_next(&it))
+    {
+        bg_graph_find_node(map->swGraph, entry->swId, &node);
+        bg_graph_clone_node(sub, node);
+        if (node->id > maxId)
+            maxId = node->id;
+    }
+    maxId++;
+
+    /*When all nodes have been cloned, wire them together. If a edge enters/leaves the subgraph, create an INPUT or OUTPUT node*/
+    for (entry = priority_list_first(group, &it);
+            entry;
+            entry = priority_list_next(&it))
+    {
+        bg_graph_find_node(map->swGraph, entry->swId, &node);
+        if (!node)
+            continue;
+
+        for (i = 0; i < node->input_port_cnt; ++i)
+        {
+            for (j = 0; j < node->input_ports[i]->num_edges; ++j)
+            {
+                /*Check if edge already exists*/
+                bg_graph_find_edge(sub, node->input_ports[i]->edges[j]->id, &edge);
+                if (edge)
+                    continue;
+
+                /*Check if source node is in group*/
+                entry2 = sw2hw_map_get_assignment(map, node->input_ports[i]->edges[j]->source_node->id);
+                if (entry2->hwId == hwId)
+                {
+                    fprintf(stderr, "Entering internal edge from %u to %u\n",
+                            (unsigned int)node->input_ports[i]->edges[j]->source_node->id,
+                            (unsigned int)node->input_ports[i]->edges[j]->sink_node->id);
+                    /*Check if edge does not exist yet!*/
+                    bg_graph_create_edge(
+                            sub,
+                            node->input_ports[i]->edges[j]->source_node->id,
+                            node->input_ports[i]->edges[j]->source_port_idx,
+                            node->input_ports[i]->edges[j]->sink_node->id,
+                            node->input_ports[i]->edges[j]->sink_port_idx,
+                            node->input_ports[i]->edges[j]->weight,
+                            node->input_ports[i]->edges[j]->id
+                            );
+                } else {
+                    fprintf(stderr, "Entering edge from %u to %u\n",
+                            (unsigned int)node->input_ports[i]->edges[j]->source_node->id,
+                            (unsigned int)node->input_ports[i]->edges[j]->sink_node->id);
+                    bg_graph_create_input(
+                            sub,
+                            "",
+                            maxId
+                            );
+                    bg_graph_create_edge(
+                            sub,
+                            maxId,
+                            0,
+                            node->input_ports[i]->edges[j]->sink_node->id,
+                            node->input_ports[i]->edges[j]->sink_port_idx,
+                            node->input_ports[i]->edges[j]->weight,
+                            node->input_ports[i]->edges[j]->id
+                            );
+                    maxId++;
+                }
+            }
+        }
+        for (i = 0; i < node->output_port_cnt; ++i)
+        {
+            for (j = 0; j < node->output_ports[i]->num_edges; ++j)
+            {
+                /*Check if edge already exists*/
+                bg_graph_find_edge(sub, node->output_ports[i]->edges[j]->id, &edge);
+                if (edge)
+                    continue;
+                /*Check if sink node is in group*/
+                entry2 = sw2hw_map_get_assignment(map, node->output_ports[i]->edges[j]->sink_node->id);
+                if (entry2->hwId == hwId)
+                {
+                    fprintf(stderr, "Leaving internal edge from %u to %u\n",
+                            (unsigned int)node->output_ports[i]->edges[j]->source_node->id,
+                            (unsigned int)node->output_ports[i]->edges[j]->sink_node->id);
+                    bg_graph_create_edge(
+                            sub,
+                            node->output_ports[i]->edges[j]->source_node->id,
+                            node->output_ports[i]->edges[j]->source_port_idx,
+                            node->output_ports[i]->edges[j]->sink_node->id,
+                            node->output_ports[i]->edges[j]->sink_port_idx,
+                            node->output_ports[i]->edges[j]->weight,
+                            node->output_ports[i]->edges[j]->id
+                            );
+                } else {
+                    fprintf(stderr, "Leaving edge from %u to %u\n",
+                            (unsigned int)node->output_ports[i]->edges[j]->source_node->id,
+                            (unsigned int)node->output_ports[i]->edges[j]->sink_node->id);
+                    bg_graph_create_output(
+                            sub,
+                            "",
+                            maxId
+                            );
+                    bg_graph_create_edge(
+                            sub,
+                            node->output_ports[i]->edges[j]->source_node->id,
+                            node->output_ports[i]->edges[j]->source_port_idx,
+                            maxId,
+                            0,
+                            1.0f, /*Leaving edges should not have a changing weight, because entering edges of other subgraphs do the calculation*/
+                            node->output_ports[i]->edges[j]->id
+                            );
+                    maxId++;
+                }
+            }
+        }
+    }
+
+    /*Finalize the graph: It inherits id of target*/
+    target = hw_graph_get_node(map->hwGraph, hwId);
+    sub->id = target->id;
+    sub->eval_order_is_dirty = true;
+
+    priority_list_deinit(group);
+    return err;
+}
