@@ -5,6 +5,8 @@
 #include "bg_impl.h"
 #include "priority_list.h"
 
+#define SW2HW_MAX_STRING_LENGTH HWG_MAX_STRING_LENGTH
+
 typedef struct {
     unsigned int swId;
     unsigned int hwId;

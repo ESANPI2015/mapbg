@@ -35,9 +35,12 @@ add_definitions(${mapBG_PKGCONFIG_CFLAGS_OTHER} -ggdb -Wall -Werror -pedantic)
 
 set(SOURCES
     src/sw_to_hw_map.c
+    src/sw_to_hw_map_loader.c
+    src/sw_to_hw_map_writer.c
     )
 set(HEADERS
     include/sw_to_hw_map.h
+    include/sw_to_hw_map_yaml.h
     )
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules/")
