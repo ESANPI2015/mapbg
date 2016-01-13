@@ -56,5 +56,9 @@ sw2hw_error sw2hw_map_regroup(sw2hw_map_t *map, costFuncPtr cost);
 
 /*For a specific target id, create a subgraph from assignments*/
 sw2hw_error sw2hw_map_create_subgraph(sw2hw_map_t *map, const unsigned int hwId, bg_graph_t *sub);
+/*After mapping this function creates a graph containing one subgraph per target*/
+sw2hw_error sw2hw_map_create_graph(sw2hw_map_t *map, bg_graph_t *graph);
+/*This function transforms the original mapping to one with a sw toplvl and subgraphs and corresponding assignments*/
+sw2hw_error sw2hw_map_transform(sw2hw_map_t *dest, sw2hw_map_t *src);
 
 #endif

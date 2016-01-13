@@ -2,6 +2,8 @@
 #include "hwg_yaml.h"
 #include "node_list.h"
 #include "bg_graph.h"
+#include "edge_list.h"
+#include "node_types/bg_node_subgraph.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -726,5 +728,140 @@ sw2hw_error sw2hw_map_create_subgraph(sw2hw_map_t *map, const unsigned int hwId,
     sub->eval_order_is_dirty = true;
 
     priority_list_deinit(group);
+    return err;
+}
+
+sw2hw_error sw2hw_map_create_graph(sw2hw_map_t *map, bg_graph_t *graph)
+{
+    sw2hw_error err = SW2HW_ERR_NONE;
+    priority_list_iterator_t it;
+    bg_edge_list_iterator_t it2;
+    hw_node_t *target;
+    bg_edge_t *edge;
+    bg_node_t *node, *subnode;
+    bg_graph_t *sub;
+    sw2hw_map_entry_t *src, *sink;
+    unsigned int edgeId = 1;
+    unsigned int i,j,k;
+    unsigned int srcIdx, sinkIdx;
+    bool skip;
+
+    /*For each target: Create a subgraph and a subgraph node*/
+    for (target = priority_list_first(map->hwGraph->nodes, &it);
+            target;
+            target = priority_list_next(&it))
+    {
+        bg_graph_alloc(&sub, target->name);
+        sw2hw_map_create_subgraph(map, target->id, sub);
+        bg_graph_create_node(graph, target->name, target->id, bg_NODE_TYPE_SUBGRAPH);
+        bg_node_set_subgraph(graph, target->id, sub);
+    }
+
+    /*For each sw edge: Check if it connects two different subgraphs and wire them accordingly*/
+    for (edge = bg_edge_list_first(map->swGraph->edge_list, &it2);
+            edge;
+            edge = bg_edge_list_next(&it2))
+    {
+        src = sw2hw_map_get_assignment(map, edge->source_node->id);
+        sink = sw2hw_map_get_assignment(map, edge->sink_node->id);
+        /*Skip edges in same subgraphs*/
+        if (src->hwId == sink->hwId)
+            continue;
+
+        /*Now the tricky part: find the INPUT/OUTPUT pair to be connected
+         * subgraphIds = hwIds, but the port indices have to be found*/
+        bg_graph_find_node(graph, src->hwId, &node);
+        sub = ((subgraph_data_t *)node->_priv_data)->subgraph;
+        bg_graph_find_node(sub, src->swId, &subnode);
+        skip = false;
+        /*Idea:
+         * * Cycle through all outgoing edges of the original source node
+         * * Find the edge with the same id
+         * * If found, find the sink node (OUTPUT node) and its corresponding output at the SUBGRAPH node
+         * * Store the index and leave*/
+        for (i = 0; (i < subnode->output_port_cnt) && !skip; ++i)
+        {
+            for (k = 0; (k < subnode->output_ports[i]->num_edges) && !skip; ++k)
+            {
+                if (subnode->output_ports[i]->edges[k]->id != edge->id)
+                    continue;
+                for (j = 0; (j < node->output_port_cnt) && !skip; ++j)
+                {
+                    if (subnode->output_ports[i]->edges[k]->sink_node->output_ports[0] == node->output_ports[j])
+                    {
+                        srcIdx = j;
+                        skip = true;
+                    }
+                }
+            }
+        }
+
+        bg_graph_find_node(graph, sink->hwId, &node);
+        sub = ((subgraph_data_t *)node->_priv_data)->subgraph;
+        bg_graph_find_node(sub, sink->swId, &subnode);
+        skip = false;
+        /*Idea:
+         * * Cycle through all incoming edges of the original sink node
+         * * Find the edge with the same id
+         * * If found, find the source node (INPUT node) and its corresponding input at the SUBGRAPH node
+         * * Store the index and leave*/
+        for (i = 0; (i < subnode->input_port_cnt) && !skip; ++i)
+        {
+            for (k = 0; (k < subnode->input_ports[i]->num_edges) && !skip; ++k)
+            {
+                if (subnode->input_ports[i]->edges[k]->id != edge->id)
+                    continue;
+                for (j = 0; (j < node->input_port_cnt) && !skip; ++j)
+                {
+                    if (subnode->input_ports[i]->edges[k]->source_node->input_ports[0] == node->input_ports[j])
+                    {
+                        sinkIdx = j;
+                        skip = true;
+                    }
+                }
+            }
+        }
+
+        fprintf(stderr, "SW2HW_MAP_CREATE_GRAPH: Connecting (%u, %u) to (%u, %u)\n", src->hwId, srcIdx, sink->hwId, sinkIdx);
+        /*Finally we create the new edge*/
+        bg_graph_create_edge(
+                graph,
+                src->hwId,
+                srcIdx,
+                sink->hwId,
+                sinkIdx,
+                1.0f,
+                edgeId
+                );
+        edgeId++;
+    }
+
+    return err;
+}
+
+sw2hw_error sw2hw_map_transform(sw2hw_map_t *dest, sw2hw_map_t *src)
+{
+    sw2hw_error err = SW2HW_ERR_NONE;
+    hw_node_t *target;
+    sw2hw_map_entry_t *entry;
+    priority_list_iterator_t it, it2;
+    int sum;
+
+    hw_graph_clone(dest->hwGraph, src->hwGraph);
+    sw2hw_map_create_graph(src, dest->swGraph);
+
+    for (target = priority_list_first(dest->hwGraph->nodes, &it);
+            target;
+            target = priority_list_next(&it))
+    {
+        sum = 0;
+        for (entry = priority_list_first(src->assignments, &it2);
+                entry;
+                entry = priority_list_next(&it2))
+            if (entry->hwId == target->id)
+                sum += priority_list_get_priority(&it2);
+        sw2hw_map_assign(dest, target->id, target->id, sum, true);
+    }
+
     return err;
 }
