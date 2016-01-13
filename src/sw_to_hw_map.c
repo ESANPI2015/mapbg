@@ -136,19 +136,18 @@ int costByAssignments(sw2hw_map_t *map, const unsigned int hwId, const unsigned 
     return current * 100 / norm;
 }
 
-sw2hw_error sw2hw_map_init(sw2hw_map_t *map, const char *hwGraphName, const char *swGraphName)
+sw2hw_error sw2hw_map_init(sw2hw_map_t *map, const hw_graph_t *hwGraph, const bg_graph_t *swGraph)
 {
-    strncpy(map->hwGraphName, hwGraphName, HWG_MAX_STRING_LENGTH);
-    strncpy(map->swGraphName, swGraphName, bg_MAX_STRING_LENGTH);
-
-    /*Load hw graph*/
+    /*Clone hw graph*/
     map->hwGraph = calloc(1, sizeof(hw_graph_t));
-    hw_graph_init(map->hwGraph, 0, "", "");
-    hw_graph_from_yaml_file(hwGraphName, map->hwGraph);
+    hw_graph_init(map->hwGraph, 1, NULL);
+    if (hwGraph)
+        hw_graph_clone(map->hwGraph, hwGraph);
 
-    /*Load sw graph*/
+    /*Clone sw graph*/
     bg_graph_alloc(&map->swGraph, "");
-    bg_graph_from_yaml_file(swGraphName, map->swGraph);
+    if (swGraph)
+        bg_graph_clone(map->swGraph, swGraph);
 
     priority_list_init(&map->assignments);
     return SW2HW_ERR_NONE;
@@ -642,7 +641,7 @@ sw2hw_error sw2hw_map_create_subgraph(sw2hw_map_t *map, const unsigned int hwId,
                 entry2 = sw2hw_map_get_assignment(map, node->input_ports[i]->edges[j]->source_node->id);
                 if (entry2->hwId == hwId)
                 {
-                    fprintf(stderr, "Entering internal edge from %u to %u\n",
+                    fprintf(stderr, "SW2HW_MAP_CREATE_SUBGRAPH: Creating internal edge from %u to %u\n",
                             (unsigned int)node->input_ports[i]->edges[j]->source_node->id,
                             (unsigned int)node->input_ports[i]->edges[j]->sink_node->id);
                     /*Check if edge does not exist yet!*/
@@ -656,9 +655,7 @@ sw2hw_error sw2hw_map_create_subgraph(sw2hw_map_t *map, const unsigned int hwId,
                             node->input_ports[i]->edges[j]->id
                             );
                 } else {
-                    fprintf(stderr, "Entering edge from %u to %u\n",
-                            (unsigned int)node->input_ports[i]->edges[j]->source_node->id,
-                            (unsigned int)node->input_ports[i]->edges[j]->sink_node->id);
+                    fprintf(stderr, "SW2HW_MAP_CREATE_SUBGRAPH: Creating input\n");
                     bg_graph_create_input(
                             sub,
                             "",
@@ -689,7 +686,7 @@ sw2hw_error sw2hw_map_create_subgraph(sw2hw_map_t *map, const unsigned int hwId,
                 entry2 = sw2hw_map_get_assignment(map, node->output_ports[i]->edges[j]->sink_node->id);
                 if (entry2->hwId == hwId)
                 {
-                    fprintf(stderr, "Leaving internal edge from %u to %u\n",
+                    fprintf(stderr, "SW2HW_MAP_CREATE_SUBGRAPH: Creating internal edge from %u to %u\n",
                             (unsigned int)node->output_ports[i]->edges[j]->source_node->id,
                             (unsigned int)node->output_ports[i]->edges[j]->sink_node->id);
                     bg_graph_create_edge(
@@ -702,9 +699,7 @@ sw2hw_error sw2hw_map_create_subgraph(sw2hw_map_t *map, const unsigned int hwId,
                             node->output_ports[i]->edges[j]->id
                             );
                 } else {
-                    fprintf(stderr, "Leaving edge from %u to %u\n",
-                            (unsigned int)node->output_ports[i]->edges[j]->source_node->id,
-                            (unsigned int)node->output_ports[i]->edges[j]->sink_node->id);
+                    fprintf(stderr, "SW2HW_MAP_CREATE_SUBGRAPH: Creating output\n");
                     bg_graph_create_output(
                             sub,
                             "",

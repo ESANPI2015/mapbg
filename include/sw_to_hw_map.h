@@ -14,9 +14,6 @@ typedef struct {
 } sw2hw_map_entry_t;
 
 typedef struct {
-    char hwGraphName[HWG_MAX_STRING_LENGTH];
-    char swGraphName[bg_MAX_STRING_LENGTH];
-
     hw_graph_t *hwGraph;
     bg_graph_t *swGraph;
 
@@ -33,7 +30,7 @@ typedef enum {
 
 typedef int (*costFuncPtr)(sw2hw_map_t *, const unsigned int, const unsigned int);
 
-sw2hw_error sw2hw_map_init(sw2hw_map_t *map, const char *hwGraphName, const char *swGraphName);
+sw2hw_error sw2hw_map_init(sw2hw_map_t *map, const hw_graph_t *hwGraph, const bg_graph_t *swGraph);
 void sw2hw_map_destroy(sw2hw_map_t *map);
 
 sw2hw_map_entry_t *sw2hw_map_get_assignment(sw2hw_map_t *map, const unsigned int swId);

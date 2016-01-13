@@ -1,13 +1,14 @@
 #include "sw_to_hw_map.h"
 #include "sw_to_hw_map_yaml.h"
-/*#include "bg_graph_yaml_loader.h"*/
-/*#include "hwg_yaml_loader.h"*/
+#include "hwg_yaml.h"
 
 #include <unistd.h>
 #include <stdlib.h>
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+
+bg_error bg_graph_from_parser(yaml_parser_t *parser, bg_graph_t *g);
 
 static sw2hw_parse_error get_event(yaml_parser_t *parser, yaml_event_t *event,
                           yaml_event_type_t type);
@@ -43,18 +44,18 @@ static sw2hw_parse_error get_int(yaml_parser_t *parser, unsigned int *result) {
 
   return err;
 }
-static sw2hw_parse_error get_string(yaml_parser_t *parser, char *s) {
-  sw2hw_parse_error err = SW2HW_PARSE_ERR_NONE;
-  yaml_event_t event;
+/*static sw2hw_parse_error get_string(yaml_parser_t *parser, char *s) {*/
+  /*sw2hw_parse_error err = SW2HW_PARSE_ERR_NONE;*/
+  /*yaml_event_t event;*/
 
-  if ((err = get_event(parser, &event, YAML_SCALAR_EVENT)) != SW2HW_PARSE_ERR_NONE)
-    return err;
+  /*if ((err = get_event(parser, &event, YAML_SCALAR_EVENT)) != SW2HW_PARSE_ERR_NONE)*/
+    /*return err;*/
 
-  strncpy(s, (const char*)event.data.scalar.value, SW2HW_MAX_STRING_LENGTH);
-  yaml_event_delete(&event);
+  /*strncpy(s, (const char*)event.data.scalar.value, SW2HW_MAX_STRING_LENGTH);*/
+  /*yaml_event_delete(&event);*/
 
-  return err;
-}
+  /*return err;*/
+/*}*/
 
 static sw2hw_parse_error parse_assignments (yaml_parser_t *parser, sw2hw_map_t *map)
 {
@@ -144,10 +145,8 @@ sw2hw_parse_error sw2hw_map_from_parser(yaml_parser_t *parser, sw2hw_map_t *map)
 {
   sw2hw_parse_error err = SW2HW_PARSE_ERR_NONE;
   yaml_event_t event;
-  bool gotHwName = false;
-  bool gotSwName = false;
-  char hwGraphName[HWG_MAX_STRING_LENGTH];
-  char swGraphName[bg_MAX_STRING_LENGTH];
+  bool gotHwGraph = false;
+  bool gotSwGraph = false;
 
   if ((err = get_event(parser, &event, YAML_MAPPING_START_EVENT)) != SW2HW_PARSE_ERR_NONE) {
       fprintf(stderr, "SW2HW_MAP_FROM_PARSER: YAML parser encountered an error finding MAPPING_START.\n");
@@ -162,20 +161,22 @@ sw2hw_parse_error sw2hw_map_from_parser(yaml_parser_t *parser, sw2hw_map_t *map)
       /*Handle event*/
       if (event.type == YAML_SCALAR_EVENT)
       {
-            if(strcmp("hwGraphName", (const char*)event.data.scalar.value) == 0) {
-                if (gotHwName)
+            if(strcmp("hwGraph", (const char*)event.data.scalar.value) == 0) {
+                if (gotHwGraph)
                 {
-                    fprintf(stderr, "SW2HW_MAP_FROM_PARSER: Multiple \"hwGraphName\" sections.\n");
+                    fprintf(stderr, "SW2HW_MAP_FROM_PARSER: Multiple \"hwGraph\" sections.\n");
+                    return SW2HW_PARSE_ERR_UNKNOWN;
                 }
-                err = get_string(parser, hwGraphName);
-                gotHwName = true;
-            } else if(strcmp("swGraphName",(const char*)event.data.scalar.value)==0) {
-                if (gotSwName)
+                hw_graph_from_parser(parser, map->hwGraph);
+                gotHwGraph = true;
+            } else if(strcmp("swGraph",(const char*)event.data.scalar.value)==0) {
+                if (gotSwGraph)
                 {
-                    fprintf(stderr, "SW2HW_MAP_FROM_PARSER: Multiple \"swGraphName\" sections.\n");
+                    fprintf(stderr, "SW2HW_MAP_FROM_PARSER: Multiple \"swGraph\" sections.\n");
+                    return SW2HW_PARSE_ERR_UNKNOWN;
                 }
-                err = get_string(parser, swGraphName);
-                gotSwName = true;
+                bg_graph_from_parser(parser, map->swGraph);
+                gotSwGraph = true;
             }
             else if(strcmp((const char*)event.data.scalar.value, "assignments") == 0)
             {
@@ -186,15 +187,14 @@ sw2hw_parse_error sw2hw_map_from_parser(yaml_parser_t *parser, sw2hw_map_t *map)
             }
       }
 
-      /*Initialize graph after getting both references*/
-      if (gotHwName && gotSwName)
-          sw2hw_map_init(map, hwGraphName, swGraphName);
-
       /*Get next event*/
       yaml_event_delete(&event);
       if (!yaml_parser_parse(parser, &event))
           err = SW2HW_PARSE_ERR_UNKNOWN;
   } while (err == SW2HW_PARSE_ERR_NONE && event.type != YAML_MAPPING_END_EVENT);
+
+  if (!gotSwGraph || !gotHwGraph)
+      err = SW2HW_PARSE_ERR_UNKNOWN;
 
   return err;
 }

@@ -1,9 +1,12 @@
 #include "sw_to_hw_map.h"
 #include "sw_to_hw_map_yaml.h"
+#include "hwg_yaml.h"
 
 #include <stdlib.h>
 #include <assert.h>
 #include <stdio.h>
+
+bg_error bg_graph_to_emitter(yaml_emitter_t *emitter, const bg_graph_t *g);
 
 static int emit_ulong(yaml_emitter_t *emitter, unsigned long x) {
   yaml_event_t event;
@@ -65,10 +68,10 @@ sw2hw_parse_error sw2hw_map_to_emitter(yaml_emitter_t *emitter, const sw2hw_map_
                                             YAML_BLOCK_MAPPING_STYLE);
   ok &= yaml_emitter_emit(emitter, &event);
   /* emit graph properties*/
-  ok &= emit_str(emitter, "hwGraphName");
-  ok &= emit_str(emitter, map->hwGraphName);
-  ok &= emit_str(emitter, "swGraphName");
-  ok &= emit_str(emitter, map->swGraphName);
+  ok &= emit_str(emitter, "hwGraph");
+  hw_graph_to_emitter(emitter, map->hwGraph);
+  ok &= emit_str(emitter, "swGraph");
+  bg_graph_to_emitter(emitter, map->swGraph);
   /* emit edges */
   ok &= emit_str(emitter, "assignments");
   ok &= yaml_sequence_start_event_initialize(&event, NULL, NULL, 0,
