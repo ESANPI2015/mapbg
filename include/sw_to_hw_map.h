@@ -60,5 +60,6 @@ sw2hw_error sw2hw_map_create_subgraph(sw2hw_map_t *map, const unsigned int hwId,
 sw2hw_error sw2hw_map_create_graph(sw2hw_map_t *map, bg_graph_t *graph);
 /*This function transforms the original mapping to one with a sw toplvl and subgraphs and corresponding assignments*/
 sw2hw_error sw2hw_map_transform(sw2hw_map_t *dest, sw2hw_map_t *src);
+bool sw2hw_map_is_transformed(sw2hw_map_t *map);
 
 #endif

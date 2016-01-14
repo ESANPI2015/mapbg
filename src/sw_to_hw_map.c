@@ -848,20 +848,53 @@ sw2hw_error sw2hw_map_transform(sw2hw_map_t *dest, sw2hw_map_t *src)
     int sum;
 
     hw_graph_clone(dest->hwGraph, src->hwGraph);
-    sw2hw_map_create_graph(src, dest->swGraph);
-
-    for (target = priority_list_first(dest->hwGraph->nodes, &it);
-            target;
-            target = priority_list_next(&it))
+    if (sw2hw_map_is_transformed(src))
     {
-        sum = 0;
-        for (entry = priority_list_first(src->assignments, &it2);
-                entry;
-                entry = priority_list_next(&it2))
-            if (entry->hwId == target->id)
-                sum += priority_list_get_priority(&it2);
-        sw2hw_map_assign(dest, target->id, target->id, sum, true);
+        /*Mapping has already been transformed, so just clone it*/
+        bg_graph_clone(dest->swGraph, src->swGraph);
+        priority_list_copy(dest->assignments, src->assignments);
+    } else {
+        /*Transform mapping*/
+        sw2hw_map_create_graph(src, dest->swGraph);
+
+        for (target = priority_list_first(dest->hwGraph->nodes, &it);
+                target;
+                target = priority_list_next(&it))
+        {
+            sum = 0;
+            for (entry = priority_list_first(src->assignments, &it2);
+                    entry;
+                    entry = priority_list_next(&it2))
+                if (entry->hwId == target->id)
+                    sum += priority_list_get_priority(&it2);
+            sw2hw_map_assign(dest, target->id, target->id, sum, true);
+        }
     }
 
+    /*The generated graph inherits its name from the hw graph*/
+    snprintf((char*)dest->swGraph->name, bg_MAX_STRING_LENGTH, "%s", src->hwGraph->name);
+
     return err;
+}
+
+bool sw2hw_map_is_transformed(sw2hw_map_t *map)
+{
+    bool isTransformed = true;
+    priority_list_iterator_t it;
+    sw2hw_map_entry_t *entry;
+    bg_node_t *node;
+
+    /*Check that a) all assignments have the same sw and hw id b) all nodes of the SW graph are SUBGRAPH nodes*/
+    for (entry = priority_list_first(map->assignments, &it);
+            entry && isTransformed;
+            entry = priority_list_next(&it))
+    {
+        if (entry->hwId != entry->swId)
+            isTransformed = false;
+        bg_graph_find_node(map->swGraph, entry->swId, &node);
+        if (node->type->id != bg_NODE_TYPE_SUBGRAPH)
+            isTransformed = false;
+    }
+
+    return isTransformed;
 }
