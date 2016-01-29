@@ -23,7 +23,7 @@ typedef struct {
 typedef enum {
     SW2HW_ERR_NONE = 0,
     SW2HW_ERR_UNKNOWN,
-    SW2HW_ERR_DUPLICATE_ASSIGNMENT,
+    SW2HW_ERR_FIXED_ASSIGNMENT,
     SW2HW_ERR_NOMEM,
     SW2HW_ERR_NOT_FOUND
 } sw2hw_error;

@@ -185,17 +185,27 @@ sw2hw_error sw2hw_map_assign(sw2hw_map_t *map, const unsigned int hwId, const un
     sw2hw_map_entry_t *entry;
     priority_list_iterator_t it;
 
-    /*Do not allow multiple assignments of a SW entity*/
-    if (sw2hw_map_get_assignment(map, swId))
-        return SW2HW_ERR_DUPLICATE_ASSIGNMENT;
+    entry = sw2hw_map_get_assignment(map, swId);
 
-    entry = calloc(1, sizeof(sw2hw_map_entry_t));
-    if (!entry)
-        return SW2HW_ERR_NOMEM;
+    if (!entry) {
+        /*Create new assignment*/
+        entry = calloc(1, sizeof(sw2hw_map_entry_t));
+        if (!entry)
+            return SW2HW_ERR_NOMEM;
 
-    entry->swId = swId;
-    entry->hwId = hwId;
-    entry->fixed = fixed;
+        entry->swId = swId;
+        entry->hwId = hwId;
+        entry->fixed = fixed;
+
+    } else {
+        /*Try to reassign*/
+        if (entry->fixed)
+            return SW2HW_ERR_FIXED_ASSIGNMENT;
+
+        /*TODO: Check if a path exists in HW graph for each source or sink node*/
+        entry->hwId = hwId;
+        entry->fixed = fixed;
+    }
 
     priority_list_insert(map->assignments, entry, prio, &it);
 
@@ -205,14 +215,13 @@ sw2hw_error sw2hw_map_assign(sw2hw_map_t *map, const unsigned int hwId, const un
 /*Match SOURCES & SINKS in HW to INPUTS & OUTPUTS in SW by matching names*/
 sw2hw_error sw2hw_map_match(sw2hw_map_t *map)
 {
-    sw2hw_error err = SW2HW_ERR_NONE;
+    sw2hw_error err = SW2HW_ERR_NOT_FOUND;
     bg_node_t *node;
     bg_node_list_iterator_t it;
     hw_node_t *hwNode;
     priority_list_iterator_t it2;
     unsigned int i;
 
-    fprintf(stderr, "SW2HW_MAP_MATCH: Start mapping by name\n");
     /*Cycle through all INPUT and OUTPUT nodes of the sw graph and try to preassign them by name*/
     for (node = bg_node_list_first(map->swGraph->input_nodes, &it);
          node;
@@ -245,8 +254,6 @@ sw2hw_error sw2hw_map_match(sw2hw_map_t *map)
                         if ((err = sw2hw_map_assign(map, hwNode->id, node->id,0,true)) != SW2HW_ERR_NONE)
                             return err;
     }
-
-    fprintf(stderr, "SW2HW_MAP_MATCH: %u nodes assigned\n", (unsigned int)priority_list_size(map->assignments));
 
     return err;
 }
@@ -291,8 +298,6 @@ sw2hw_error sw2hw_map_initial(sw2hw_map_t *map, costFuncPtr cost)
     priority_list_t *possible;
     sw2hw_map_entry_t *entry;
 
-    fprintf(stderr, "SW2HW_MAP_INITIAL: Start initial mapping\n");
-
     /*I. Produce a list of all sw entities*/
     priority_list_init(&possible);
     bg_node_list_init(&allNodes);
@@ -308,8 +313,6 @@ sw2hw_error sw2hw_map_initial(sw2hw_map_t *map, costFuncPtr cost)
             node;
             node = bg_node_list_next(&it))
         bg_node_list_append(allNodes, node);
-
-    fprintf(stderr, "SW2HW_MAP_INITIAL: Found %u SW nodes\n", (unsigned int)bg_node_list_size(allNodes));
 
     while (bg_node_list_size(allNodes)>0)
     {
@@ -331,9 +334,7 @@ sw2hw_error sw2hw_map_initial(sw2hw_map_t *map, costFuncPtr cost)
         }
         /*At the head of possible assignment list is the one with lowest cost!*/
         entry = priority_list_first(possible, &it2);
-        fprintf(stderr, "SW2HW_MAP_INITIAL: Assigning %u to %u\n", entry->swId, entry->hwId);
-        if (sw2hw_map_assign(map, entry->hwId, entry->swId, priority_list_get_priority(&it3), false) == SW2HW_ERR_DUPLICATE_ASSIGNMENT)
-            fprintf(stderr, "SW2HW_MAP_INITIAL: %u already assigned. Skipping\n", entry->swId);
+        sw2hw_map_assign(map, entry->hwId, entry->swId, priority_list_get_priority(&it3), false);
 
         /*Remove assigned node from allNodes*/
         bg_graph_find_node(map->swGraph, entry->swId, &node);
@@ -351,7 +352,6 @@ sw2hw_error sw2hw_map_initial(sw2hw_map_t *map, costFuncPtr cost)
     bg_node_list_deinit(allNodes);
     priority_list_deinit(possible);
 
-    fprintf(stderr, "SW2HW_MAP_INITIAL: Mapping finished\n");
     return SW2HW_ERR_NONE;
 }
 
@@ -372,12 +372,10 @@ sw2hw_error sw2hw_map_refine(sw2hw_map_t *map, costFuncPtr cost)
     hw_node_t *target;
     unsigned int storedId;
 
-    fprintf(stderr, "SW2HW_MAP_REFINE: Starting global optimization\n");
     priority_list_init(&possible);
 
     /* At first calculate initial global costs */
     global = sw2hw_map_calculate_costs(map, cost);
-    fprintf(stderr, "SW2HW_MAP_REFINE: Initial global costs %d\n", global);
 
     /*Then we have to copy list, because assignments get modified by calculate costs*/
     priority_list_init(&copy);
@@ -385,7 +383,7 @@ sw2hw_error sw2hw_map_refine(sw2hw_map_t *map, costFuncPtr cost)
 
     /*For each assignment: try to find a better target*/
     for (entry = priority_list_last(copy, &it);
-            entry;
+            entry && (err == SW2HW_ERR_NONE);
             entry = priority_list_prev(&it))
     {
         /*Skip fixed entries*/
@@ -393,7 +391,7 @@ sw2hw_error sw2hw_map_refine(sw2hw_map_t *map, costFuncPtr cost)
             continue;
         /*Cycle through targets*/
         for (target = priority_list_first(map->hwGraph->nodes, &it2);
-                target;
+                target && (err == SW2HW_ERR_NONE);
                 target = priority_list_next(&it2))
         {
             /*Skip same target*/
@@ -401,15 +399,16 @@ sw2hw_error sw2hw_map_refine(sw2hw_map_t *map, costFuncPtr cost)
                 continue;
             /*Virtually assign to new target*/
             storedId = entry->hwId;
-            entry->hwId = target->id;
+            if (sw2hw_map_assign(map, target->id, entry->swId, priority_list_get_priority(&it), false) != SW2HW_ERR_NONE)
+                continue;
             /*Calculate new global costs*/
             singleCost = sw2hw_map_calculate_costs(map, cost);
             /*Undo assignment*/
-            entry->hwId = storedId;
+            if ((err = sw2hw_map_assign(map, storedId, entry->swId, priority_list_get_priority(&it), false)) != SW2HW_ERR_NONE)
+                continue;
             /*Check assignment*/
             if (global > singleCost)
             {
-                fprintf(stderr, "SW2HW_MAP_REFINE: Found possible target %u for %u\n", target->id, entry->swId);
                 entry2 = calloc(1, sizeof(sw2hw_map_entry_t));
                 entry2->hwId = target->id;
                 entry2->swId = entry->swId;
@@ -421,16 +420,13 @@ sw2hw_error sw2hw_map_refine(sw2hw_map_t *map, costFuncPtr cost)
     entry = priority_list_first(possible, &it);
     if (entry)
     {
-        entry2 = sw2hw_map_get_assignment(map, entry->swId);
-        fprintf(stderr, "SW2HW_MAP_REFINE: Reassigning %u from %u to %u\n", entry->swId, entry2->hwId, entry->hwId);
-        entry2->hwId = entry->hwId;
+        /*(Re)assign*/
+        err = sw2hw_map_assign(map, entry->hwId, entry->swId, priority_list_get_priority(&it), false);
     } else {
-        fprintf(stderr, "SW2HW_MAP_REFINE: No good reassignment found\n");
         err = SW2HW_ERR_NOT_FOUND;
     }
 
     global = sw2hw_map_calculate_costs(map, cost);
-    fprintf(stderr, "SW2HW_MAP_REFINE: New global costs %d\n", global);
 
     /*Cleanup*/
     for (entry = priority_list_first(possible, &it);
@@ -439,7 +435,6 @@ sw2hw_error sw2hw_map_refine(sw2hw_map_t *map, costFuncPtr cost)
         free(entry);
     priority_list_deinit(possible);
     priority_list_deinit(copy);
-    fprintf(stderr, "SW2HW_MAP_REFINE: Optimization finished\n");
 
     return err;
 }
@@ -456,13 +451,11 @@ sw2hw_error sw2hw_map_regroup(sw2hw_map_t *map, costFuncPtr cost)
     sw2hw_map_permutation_t *perm;
     unsigned int hwId, hwId2;
 
-    fprintf(stderr, "SW2HW_MAP_REGROUP: Starting global optimization\n");
     priority_list_init(&groups);
     priority_list_init(&possible);
 
     /* At first calculate initial global costs */
     global = sw2hw_map_calculate_costs(map, cost);
-    fprintf(stderr, "SW2HW_MAP_REGROUP: Initial global costs %d\n", global);
 
     /*Build priority list of priority lists of assignments with same target*/
     for (entry = priority_list_first(map->assignments, &it);
@@ -497,47 +490,57 @@ sw2hw_error sw2hw_map_regroup(sw2hw_map_t *map, costFuncPtr cost)
 
     /*The idea: Try to find a permutation of groups which decreases global cost*/
     for (group = priority_list_last(groups, &it);
-            group;
+            group && (err == SW2HW_ERR_NONE);
             group = priority_list_prev(&it))
     {
         entry = priority_list_first(group, &it2);
+        if (!entry)
+            continue;
         hwId = entry->hwId;
         
         memcpy(&it2, &it, sizeof(priority_list_iterator_t));
         for (group2 = priority_list_get(&it2);
-                group2;
+                group2 && (err == SW2HW_ERR_NONE);
                 group2 = priority_list_prev(&it2))
         {
             if (group2 == group)
                 continue;
             entry2 = priority_list_first(group2, &it3);
+            if (!entry2)
+                continue;
             hwId2 = entry2->hwId;
             /*Now we virtually assign all entries in group to hwId of group2 and vice versa*/
             for (entry = priority_list_first(group2, &it3);
-                    entry;
+                    entry && (err == SW2HW_ERR_NONE);
                     entry = priority_list_next(&it3))
-                entry->hwId = hwId;
+                err = sw2hw_map_assign(map, hwId, entry->swId, priority_list_get_priority(&it), false);
             for (entry = priority_list_first(group, &it3);
-                    entry;
+                    entry && (err == SW2HW_ERR_NONE);
                     entry = priority_list_next(&it3))
-                entry->hwId = hwId2;
+                err = sw2hw_map_assign(map, hwId2, entry->swId, priority_list_get_priority(&it), false);
 
             /*Then we recalculate costs*/
-            singleCost = sw2hw_map_calculate_costs(map, cost);
+            singleCost = global;
+            if (err == SW2HW_ERR_NONE)
+                singleCost = sw2hw_map_calculate_costs(map, cost);
+
             /*Undo virtual assignment*/
+            err = SW2HW_ERR_NONE; /*It is ok to have errors in previous virtual assignments ... but not when undoing it!*/
             for (entry = priority_list_first(group2, &it3);
-                    entry;
+                    entry && (err == SW2HW_ERR_NONE);
                     entry = priority_list_next(&it3))
-                entry->hwId = hwId2;
+                err = sw2hw_map_assign(map, hwId2, entry->swId, priority_list_get_priority(&it), false);
             for (entry = priority_list_first(group, &it3);
-                    entry;
+                    entry && (err == SW2HW_ERR_NONE);
                     entry = priority_list_next(&it3))
-                entry->hwId = hwId;
+                err = sw2hw_map_assign(map, hwId, entry->swId, priority_list_get_priority(&it), false);
+
+            if (err != SW2HW_ERR_NONE)
+                continue;
 
             /*If its less we make the changes permanent*/
             if (global > singleCost)
             {
-                fprintf(stderr, "SW2HW_MAP_REGROUP: Found permutation of %u and %u\n", hwId, hwId2);
                 perm = calloc(1, sizeof(sw2hw_map_permutation_t));
                 perm->group1 = group;
                 perm->group2 = group2;
@@ -546,25 +549,25 @@ sw2hw_error sw2hw_map_regroup(sw2hw_map_t *map, costFuncPtr cost)
         }
     }
 
-    perm = priority_list_first(possible, &it);
-    if (perm) {
-        entry = priority_list_first(perm->group1, &it);
-        entry2 = priority_list_first(perm->group2, &it);
-        hwId = entry->hwId;
-        hwId2 = entry2->hwId;
-        fprintf(stderr, "SW2HW_MAP_REGROUP: Applying permutation %u and %u\n", hwId, hwId2);
-        /*Make virtual assignment real*/
-        for (entry = priority_list_first(perm->group2, &it3);
-                entry;
-                entry = priority_list_next(&it3))
-            entry->hwId = hwId;
-        for (entry = priority_list_first(perm->group1, &it3);
-                entry;
-                entry = priority_list_next(&it3))
-            entry->hwId = hwId2;
-    } else {
-        fprintf(stderr, "SW2HW_MAP_REGROUP: No good permutation found\n");
-        err = SW2HW_ERR_NOT_FOUND;
+    if (err == SW2HW_ERR_NONE) {
+        perm = priority_list_first(possible, &it);
+        if (perm) {
+            entry = priority_list_first(perm->group1, &it);
+            entry2 = priority_list_first(perm->group2, &it);
+            hwId = entry->hwId;
+            hwId2 = entry2->hwId;
+            /*Make virtual assignment real*/
+            for (entry = priority_list_first(perm->group2, &it3);
+                    entry;
+                    entry = priority_list_next(&it3))
+                entry->hwId = hwId;
+            for (entry = priority_list_first(perm->group1, &it3);
+                    entry;
+                    entry = priority_list_next(&it3))
+                entry->hwId = hwId2;
+        } else {
+            err = SW2HW_ERR_NOT_FOUND;
+        }
     }
 
     /*Cleanup*/
@@ -581,10 +584,6 @@ sw2hw_error sw2hw_map_regroup(sw2hw_map_t *map, costFuncPtr cost)
     priority_list_deinit(groups);
 
     global = sw2hw_map_calculate_costs(map, cost);
-    fprintf(stderr, "SW2HW_MAP_REGROUP: New global costs %d\n", global);
-
-    fprintf(stderr, "SW2HW_MAP_REGROUP: Optimization finished\n");
-
     return err;
 }
 
@@ -643,9 +642,6 @@ sw2hw_error sw2hw_map_create_subgraph(sw2hw_map_t *map, const unsigned int hwId,
                 entry2 = sw2hw_map_get_assignment(map, node->input_ports[i]->edges[j]->source_node->id);
                 if (entry2->hwId == hwId)
                 {
-                    fprintf(stderr, "SW2HW_MAP_CREATE_SUBGRAPH: Creating internal edge from %u to %u\n",
-                            (unsigned int)node->input_ports[i]->edges[j]->source_node->id,
-                            (unsigned int)node->input_ports[i]->edges[j]->sink_node->id);
                     /*Check if edge does not exist yet!*/
                     bg_graph_create_edge(
                             sub,
@@ -657,7 +653,6 @@ sw2hw_error sw2hw_map_create_subgraph(sw2hw_map_t *map, const unsigned int hwId,
                             node->input_ports[i]->edges[j]->id
                             );
                 } else {
-                    fprintf(stderr, "SW2HW_MAP_CREATE_SUBGRAPH: Creating input\n");
                     bg_graph_create_input(
                             sub,
                             "",
@@ -688,9 +683,6 @@ sw2hw_error sw2hw_map_create_subgraph(sw2hw_map_t *map, const unsigned int hwId,
                 entry2 = sw2hw_map_get_assignment(map, node->output_ports[i]->edges[j]->sink_node->id);
                 if (entry2->hwId == hwId)
                 {
-                    fprintf(stderr, "SW2HW_MAP_CREATE_SUBGRAPH: Creating internal edge from %u to %u\n",
-                            (unsigned int)node->output_ports[i]->edges[j]->source_node->id,
-                            (unsigned int)node->output_ports[i]->edges[j]->sink_node->id);
                     bg_graph_create_edge(
                             sub,
                             node->output_ports[i]->edges[j]->source_node->id,
@@ -701,7 +693,6 @@ sw2hw_error sw2hw_map_create_subgraph(sw2hw_map_t *map, const unsigned int hwId,
                             node->output_ports[i]->edges[j]->id
                             );
                 } else {
-                    fprintf(stderr, "SW2HW_MAP_CREATE_SUBGRAPH: Creating output\n");
                     bg_graph_create_output(
                             sub,
                             "",
@@ -822,7 +813,6 @@ sw2hw_error sw2hw_map_create_graph(sw2hw_map_t *map, bg_graph_t *graph)
             }
         }
 
-        fprintf(stderr, "SW2HW_MAP_CREATE_GRAPH: Connecting (%u, %u) to (%u, %u)\n", src->hwId, srcIdx, sink->hwId, sinkIdx);
         /*Finally we create the new edge*/
         bg_graph_create_edge(
                 graph,
