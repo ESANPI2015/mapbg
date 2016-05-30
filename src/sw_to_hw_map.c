@@ -10,7 +10,7 @@
 /*For external edges the cost are higher than for neighbouring edges which have higher costs than internal edges*/
 int costByNeighbours(sw2hw_map_t *map, const unsigned int hwId, const unsigned int swId)
 {
-    int norm = 0;
+    int norm = 1;
     int cost = 0;
     unsigned int i,j,k;
     sw2hw_map_entry_t *assignment = NULL;
@@ -79,7 +79,7 @@ int costByNeighbours(sw2hw_map_t *map, const unsigned int hwId, const unsigned i
 /*Internal vs. external edge count*/
 int costByExternalEdges(sw2hw_map_t *map, const unsigned int hwId, const unsigned int swId)
 {
-    int norm = 0;
+    int norm = 1;
     int cost = 0;
     unsigned int i,j;
     sw2hw_map_entry_t *assignment = NULL;
